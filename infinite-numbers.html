@@ -154,7 +154,10 @@
           maxNumberBoost: 100000.0,      // предел доп. ускорения от текущего числа
           maxMultiplier: 600000.0,       // общий предел множителя рывка
           friction: 0.94,           // затухание инерции каждый кадр; меньше = быстрее гаснет
-          stopSpeed: 0.002          // скорость ниже этой обнуляется
+          stopSpeed: 0.002,         // скорость ниже этой обнуляется
+          // Минимальная суммарная длина жеста (px). Кинетический рывок срабатывает
+          // только если палец прошёл больше этого расстояния за один жест.
+          minFlingDistance: 150
         }
       };
       let W = innerWidth, H = innerHeight;
@@ -165,6 +168,7 @@
       let activePointer = null;
       let lastX = 0, lastT = 0;
       let startX = 0, startY = 0, startT = 0;
+      let dragDistance = 0; // суммарная длина текущего жеста в px
       let target = 12;
       let score = 0;
       const tiles = [];
@@ -374,6 +378,7 @@
         velocity = 0;
         lastX = startX = e.clientX;
         lastT = startT = performance.now();
+        dragDistance = 0;
         startY = e.clientY;
         e.preventDefault();
       }, { passive: false });
@@ -384,6 +389,7 @@
         const dx = e.clientX - lastX;
         const dt = Math.max(1, now - lastT);
         offset = softClamp(offset - dx);
+        dragDistance += Math.abs(dx); // накапливаем полную длину жеста
         const v = (-dx) / dt;
         velocity = velocity * 0.65 + v * 0.35;
         lastX = e.clientX;
@@ -401,7 +407,12 @@
         const dt = performance.now() - startT;
         if (moved < 12 && dt < 380) handleTap(e.clientX, e.clientY);
         // Резкий жест получает бонус от звёзд/текущего числа; медленный drag уже был 1:1.
-        velocity *= kineticGain();
+        // Кинетика срабатывает только для достаточно длинных жестов.
+        if (dragDistance >= CONFIG.kinetic.minFlingDistance) {
+          velocity *= kineticGain();
+        } else {
+          velocity = 0; // короткий жест — останавливаемся без инерции
+        }
         const b = bounds();
         if (offset < b.min || offset > b.max) velocity = 0;
       }
