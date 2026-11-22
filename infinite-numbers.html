@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#6c5ce7" />
+  <title>Бесконечные числа</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background:
+        radial-gradient(circle at 20% 10%, rgba(255,255,255,.22), transparent 28%),
+        radial-gradient(circle at 80% 90%, rgba(255,255,255,.14), transparent 30%),
+        linear-gradient(135deg, #6c5ce7, #00cec9 55%, #55efc4);
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      overscroll-behavior: none;
+    }
+    #viewport { position: fixed; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
+    #viewport.dragging { cursor: grabbing; }
+    .tile {
+      position: absolute;
+      left: 0;
+      top: 0;
+      border-radius: 24%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      text-shadow: 0 2px 8px rgba(0,0,0,.28);
+      border: 3px solid rgba(255,255,255,.34);
+      box-shadow: 0 12px 26px rgba(0,0,0,.22), inset 0 2px 0 rgba(255,255,255,.25);
+      will-change: transform, opacity;
+      backface-visibility: hidden;
+    }
+    .tile > span { display: block; transform-origin: center; }
+    .tile.pop > span { animation: pop .42s ease-out; }
+    .tile.hit { filter: saturate(1.25) brightness(1.12); }
+    .tile.hit > span { animation: hitpop .58s ease-out; }
+    @keyframes pop {
+      0% { transform: scale(1); }
+      38% { transform: scale(1.28) rotate(-7deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+    @keyframes hitpop {
+      0% { transform: scale(1); }
+      30% { transform: scale(1.55) rotate(9deg); }
+      62% { transform: scale(.92) rotate(-5deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+    .big-star {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: min(38vmin, 260px);
+      opacity: 0;
+      transform: scale(.4);
+      pointer-events: none;
+      z-index: 30;
+      filter: drop-shadow(0 12px 28px rgba(0,0,0,.38));
+    }
+    .big-star.show { animation: star 1s ease-out forwards; }
+    @keyframes star {
+      0% { opacity: 0; transform: scale(.2) rotate(-25deg); }
+      18% { opacity: 1; transform: scale(1.25) rotate(8deg); }
+      38% { transform: scale(.95) rotate(-4deg); }
+      62% { opacity: 1; transform: scale(1.08) rotate(3deg); }
+      100% { opacity: 0; transform: scale(1.55) rotate(0deg); }
+    }
+    .pill {
+      position: fixed;
+      top: max(10px, env(safe-area-inset-top));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      max-width: calc(100vw - 24px);
+      padding: 10px 14px;
+      border-radius: 999px;
+      color: #fff;
+      background: rgba(0,0,0,.34);
+      box-shadow: 0 8px 24px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.16);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      font-size: clamp(15px, 2.4vw, 23px);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .score { color: #ffeaa7; }
+    .hint {
+      position: fixed;
+      left: 50%;
+      bottom: max(10px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      z-index: 10;
+      color: rgba(255,255,255,.92);
+      background: rgba(0,0,0,.22);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: clamp(12px, 2vw, 17px);
+      font-weight: 700;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport" aria-label="Бесконечная лента с числами">
+    <div id="bigStar" class="big-star" aria-hidden="true">⭐</div>
+    <div class="pill"><span id="goal">Найди: 12</span><span class="score" id="score">★ 0</span></div>
+    <div class="hint">Тяни ленту пальцем • Ткни в число</div>
+    <div id="strip"></div>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const viewport = document.getElementById('viewport');
+      const strip = document.getElementById('strip');
+      const goalEl = document.getElementById('goal');
+      const scoreEl = document.getElementById('score');
+      const bigStar = document.getElementById('bigStar');
+
+      const numberFmt = new Intl.NumberFormat('ru-RU');
+
+      // === НАСТРОЙКИ: меняйте коэффициенты здесь ===
+      const CONFIG = {
+        // Прогрессия расстояния до следующего числа: [минимум, максимум] после N-й звёздочки.
+        taskGaps: [
+          [30, 50],     // 1-я найденная звезда
+          [100, 150],   // 2-я
+          [260, 380],   // 3-я
+          [650, 950],   // 4-я
+          [1500, 2200], // 5-я
+          [3500, 5200]  // 6-я и далее — дальше растёт автоматически
+        ],
+        kinetic: {
+          // Важно: множитель ниже НЕ меняет медленную прокрутку пальцем.
+          // Он применяется только к скорости резкого жеста в момент отпускания.
+          baseMultiplier: 1.0,      // стартовый множитель рывка при 0 звёздах
+          perStarMultiplier: 0.08,  // +8% к рывку за каждую собранную звёздочку
+          currentNumberBoost: 0.20, // доп. ускорение за большое число на экране
+          starRefNumber: 500,       // текущее число = starRefNumber даёт +currentNumberBoost
+          maxNumberBoost: 1.0,      // предел доп. ускорения от текущего числа
+          maxMultiplier: 6.0,       // общий предел множителя рывка
+          friction: 0.94,           // затухание инерции каждый кадр; меньше = быстрее гаснет
+          stopSpeed: 0.002          // скорость ниже этой обнуляется
+        }
+      };
+      let W = innerWidth, H = innerHeight;
+      let S = 100, STEP = 120, COUNT = 14, CENTER = W / 2;
+      let offset = 0;
+      let velocity = 0;
+      let dragging = false;
+      let activePointer = null;
+      let lastX = 0, lastT = 0;
+      let startX = 0, startY = 0, startT = 0;
+      let target = 12;
+      let score = 0;
+      const tiles = [];
+
+      // Мягкие границы: слева не уходим далеко от 1, вправо ограничений нет.
+      function bounds() {
+        return { min: -STEP * 0.9, max: Number.POSITIVE_INFINITY };
+      }
+
+      function softClamp(o) {
+        const b = bounds();
+        if (o < b.min) return b.min + (o - b.min) * 0.28;
+        if (o > b.max) return b.max + (o - b.max) * 0.28;
+        return o;
+      }
+
+      function colorFor(n) {
+        const h = (n * 47) % 360;
+        const h2 = (h + 42) % 360;
+        return `linear-gradient(145deg, hsl(${h}, 95%, 62%), hsl(${h2}, 92%, 52%))`;
+      }
+
+      function fontSizeFor(n) {
+        if (n < 10) return Math.round(S * 0.52);
+        if (n < 100) return Math.round(S * 0.43);
+        if (n < 1000) return Math.round(S * 0.35);
+        if (n < 100000) return Math.round(S * 0.27);
+        return Math.round(S * 0.21);
+      }
+
+      // Бесконечная отрисовка окна чисел: плитки переиспользуются.
+      function render() {
+        const around = Math.round((offset - CENTER) / STEP + 1);
+        const start = Math.max(1, around - Math.floor(COUNT / 2));
+        const top = (H - S) / 2;
+
+        for (let i = 0; i < COUNT; i++) {
+          const tile = tiles[i];
+          const n = start + i;
+          const x = CENTER + (n - 1) * STEP - offset;
+          tile.index = n;
+          tile.x = x;
+
+          if (x < -S * 1.6 || x > W + S * 1.6) {
+            tile.el.style.opacity = '0';
+            continue;
+          }
+          tile.el.style.opacity = '1';
+          tile.el.style.background = colorFor(n);
+          tile.el.style.fontSize = fontSizeFor(n) + 'px';
+          tile.el.style.transform = `translate3d(${x - S / 2}px, ${top}px, 0)`;
+          tile.el.firstElementChild.textContent = numberFmt.format(n);
+        }
+      }
+
+      function resize() {
+        W = innerWidth;
+        H = innerHeight;
+        S = Math.round(Math.max(66, Math.min(124, W * 0.15, H * 0.34)));
+        STEP = Math.round(S * 1.18);
+        COUNT = Math.ceil(W / STEP) + 10;
+        CENTER = W / 2;
+        offset = Math.max(bounds().min, Math.min(bounds().max, offset));
+        strip.textContent = '';
+        tiles.length = 0;
+        for (let i = 0; i < COUNT; i++) {
+          const el = document.createElement('div');
+          el.className = 'tile';
+          el.style.width = S + 'px';
+          el.style.height = S + 'px';
+          const span = document.createElement('span');
+          el.appendChild(span);
+          strip.appendChild(el);
+          tiles.push({ el, index: 0, x: 0 });
+        }
+        render();
+      }
+
+      function unlockAudio() {
+        try {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (!AC) return;
+          beep.ctx = beep.ctx || new AC();
+          if (beep.ctx.state === 'suspended') beep.ctx.resume();
+        } catch (_) {}
+      }
+
+      function beep(freq, dur, delay) {
+        try {
+          const ctx = beep.ctx;
+          if (!ctx || ctx.state !== 'running') return;
+          const t = ctx.currentTime + (delay || 0);
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, t);
+          gain.gain.setValueAtTime(0.0001, t);
+          gain.gain.exponentialRampToValueAtTime(0.12, t + 0.012);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + dur + 0.03);
+        } catch (_) {}
+      }
+
+      function slide(from, to, dur, type, delay, vol) {
+        const ctx = beep.ctx;
+        if (!ctx || ctx.state !== 'running') return;
+        const t = ctx.currentTime + (delay || 0);
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.setValueAtTime(from, t);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(1, to), t + dur);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(vol || 0.12, t + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + dur + 0.05);
+      }
+
+      function playWrong() {
+        slide(520, 110, 0.34, 'sawtooth', 0, 0.10);
+        slide(760, 300, 0.10, 'square', 0, 0.035);
+        slide(330, 80, 0.38, 'sawtooth', 0.18, 0.09);
+      }
+
+      function showBigStar() {
+        bigStar.classList.remove('show');
+        void bigStar.offsetWidth;
+        bigStar.classList.add('show');
+        setTimeout(() => bigStar.classList.remove('show'), 1050);
+      }
+
+      // Расстояние до следующего задания зависит от уже собранных звёзд.
+      function nextGap() {
+        const gaps = CONFIG.taskGaps;
+        const solvedIndex = Math.max(0, score - 1);
+        const band = gaps[Math.min(solvedIndex, gaps.length - 1)];
+        let lo = band[0], hi = band[1];
+        if (solvedIndex >= gaps.length) {
+          const extra = solvedIndex - gaps.length + 1;
+          const k = Math.pow(2.3, extra);
+          lo = Math.round(lo * k);
+          hi = Math.round(hi * k);
+        }
+        return lo + Math.floor(Math.random() * (hi - lo + 1));
+      }
+
+      // Прогрессивный множитель кинетического жеста: медленный drag остаётся 1:1,
+      // а множитель применяется один раз при отпускании пальца.
+      function kineticGain() {
+        const k = CONFIG.kinetic;
+        const currentNumber = Math.max(1, Math.round((offset - CENTER) / STEP + 1));
+        const numberPart = k.currentNumberBoost * Math.min(k.maxNumberBoost, currentNumber / k.starRefNumber);
+        const gain = k.baseMultiplier + score * k.perStarMultiplier + numberPart;
+        return Math.min(k.maxMultiplier, gain);
+      }
+
+      function popTile(tile, correct) {
+        tile.el.classList.remove('pop', 'hit');
+        void tile.el.offsetWidth;
+        tile.el.classList.add('pop');
+        if (correct) tile.el.classList.add('hit');
+        setTimeout(() => tile.el.classList.remove('pop', 'hit'), correct ? 620 : 460);
+      }
+
+      // Тап по плитке: либо смешной звук промаха, либо звезда + новое задание.
+      function handleTap(x, y) {
+        const top = (H - S) / 2;
+        let tapped = null;
+        for (const tile of tiles) {
+          if (tile.index < 1) continue;
+          const left = tile.x - S / 2;
+          if (x >= left && x <= left + S && y >= top && y <= top + S) {
+            tapped = tile;
+            break;
+          }
+        }
+        if (!tapped) return;
+
+        const correct = tapped.index === target;
+        popTile(tapped, correct);
+        if (correct) {
+          score++;
+          scoreEl.textContent = '★ ' + score;
+          showBigStar();
+          beep(523, 0.08, 0);
+          beep(659, 0.08, 0.08);
+          beep(784, 0.10, 0.16);
+          beep(1047, 0.16, 0.25);
+          target = tapped.index + nextGap();
+          goalEl.textContent = 'Найди: ' + numberFmt.format(target);
+        } else {
+          playWrong();
+        }
+      }
+
+      viewport.addEventListener('pointerdown', (e) => {
+        if (activePointer !== null) return;
+        unlockAudio();
+        activePointer = e.pointerId;
+        try { viewport.setPointerCapture(e.pointerId); } catch (_) {}
+        viewport.classList.add('dragging');
+        dragging = true;
+        velocity = 0;
+        lastX = startX = e.clientX;
+        lastT = startT = performance.now();
+        startY = e.clientY;
+        e.preventDefault();
+      }, { passive: false });
+
+      viewport.addEventListener('pointermove', (e) => {
+        if (e.pointerId !== activePointer) return;
+        const now = performance.now();
+        const dx = e.clientX - lastX;
+        const dt = Math.max(1, now - lastT);
+        offset = softClamp(offset - dx);
+        const v = (-dx) / dt;
+        velocity = velocity * 0.65 + v * 0.35;
+        lastX = e.clientX;
+        lastT = now;
+        render();
+        e.preventDefault();
+      }, { passive: false });
+
+      function endPointer(e) {
+        if (e.pointerId !== activePointer) return;
+        viewport.classList.remove('dragging');
+        dragging = false;
+        activePointer = null;
+        const moved = Math.hypot(e.clientX - startX, e.clientY - startY);
+        const dt = performance.now() - startT;
+        if (moved < 12 && dt < 380) handleTap(e.clientX, e.clientY);
+        // Резкий жест получает бонус от звёзд/текущего числа; медленный drag уже был 1:1.
+        velocity *= kineticGain();
+        const b = bounds();
+        if (offset < b.min || offset > b.max) velocity = 0;
+      }
+
+      viewport.addEventListener('pointerup', endPointer);
+      viewport.addEventListener('pointercancel', (e) => {
+        if (e.pointerId !== activePointer) return;
+        viewport.classList.remove('dragging');
+        dragging = false;
+        activePointer = null;
+        velocity = 0;
+      });
+      viewport.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      let last = performance.now();
+      // Инерция и возврат к границам после жеста.
+      function tick(now) {
+        const dt = Math.min(45, now - last);
+        last = now;
+        if (!dragging) {
+          const b = bounds();
+          if (offset < b.min || offset > b.max) {
+            const goal = Math.max(b.min, Math.min(b.max, offset));
+            offset += (goal - offset) * 0.18;
+            velocity *= 0.78;
+            if (Math.abs(goal - offset) < 0.4) offset = goal;
+          } else {
+            offset += velocity * dt;
+            velocity *= Math.pow(CONFIG.kinetic.friction, dt / 16.67);
+            if (Math.abs(velocity) < CONFIG.kinetic.stopSpeed) velocity = 0;
+            const bb = bounds();
+            if (offset < bb.min) { offset = bb.min; velocity = 0; }
+            if (offset > bb.max) { offset = bb.max; velocity = 0; }
+          }
+          render();
+        }
+        requestAnimationFrame(tick);
+      }
+
+      addEventListener('resize', resize);
+      addEventListener('orientationchange', () => setTimeout(resize, 80));
+      resize();
+      requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>
