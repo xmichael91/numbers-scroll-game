@@ -120,7 +120,6 @@
     <div class="hint">Тяни ленту пальцем • Ткни в число</div>
     <div id="strip"></div>
   </div>
-
   <script>
     (() => {
       'use strict';
@@ -197,6 +196,33 @@
         if (n < 1000) return Math.round(S * 0.35);
         if (n < 100000) return Math.round(S * 0.27);
         return Math.round(S * 0.21);
+      }
+
+      // === СОХРАНЕНИЕ ПРОГРЕССА ===
+      // localStorage — правильный выбор для GitHub Pages: хранится в браузере
+      // пользователя. try/catch — на
+      // случай приватного режима, где localStorage может быть недоступен.
+      const SAVE_KEY = 'infinite-numbers-progress-v1';
+
+      function saveProgress() {
+        try {
+          localStorage.setItem(SAVE_KEY, JSON.stringify({
+            score: score,
+            target: target,
+            offset: offset
+          }));
+        } catch (_) {}
+      }
+
+      function loadProgress() {
+        try {
+          const raw = localStorage.getItem(SAVE_KEY);
+          if (!raw) return;
+          const s = JSON.parse(raw);
+          if (typeof s.score === 'number' && s.score >= 0) score = s.score;
+          if (typeof s.target === 'number' && s.target >= 1) target = s.target;
+          if (typeof s.offset === 'number' && isFinite(s.offset)) offset = Math.max(bounds().min, s.offset);
+        } catch (_) {}
       }
 
       // Бесконечная отрисовка окна чисел: плитки переиспользуются.
@@ -363,6 +389,7 @@
           beep(1047, 0.16, 0.25);
           target = tapped.index + nextGap();
           goalEl.textContent = 'Найди: ' + numberFmt.format(target);
+          saveProgress();
         } else {
           playWrong();
         }
@@ -452,9 +479,17 @@
         requestAnimationFrame(tick);
       }
 
+      addEventListener('pagehide', saveProgress);
+      document.addEventListener('visibilitychange', () => { if (document.hidden) saveProgress(); });
+      // Раз в 5 секунд мягко сохраняем позицию — дёшево и надёжно.
+      setInterval(saveProgress, 5000);
+
       addEventListener('resize', resize);
       addEventListener('orientationchange', () => setTimeout(resize, 80));
       resize();
+      loadProgress(); // восстанавливаем звёзды, задание и позицию
+      scoreEl.textContent = '★ ' + score;
+      goalEl.textContent = 'Найди: ' + numberFmt.format(target);
       requestAnimationFrame(tick);
     })();
   </script>
